@@ -1,0 +1,125 @@
+Email Campaign Spam Detector
+========================================================
+author: Jose M. Romero
+date: April 23, 2015
+***
+![alt text](images/spam.png)
+
+RATIONALE - Marketer Needs
+========================================================
+
+Marketers are various companies continuously try to reach their customers 
+through email campaigns. These campaigns cost monet but unfortunately a 
+lot of these emails are sent directly to the recipient's **spam** folder.
+
+We propose to provide marketers with a tool they can use to validate the
+content of their email campaigns for **spam** triggers before they send them.
+
+With this tool, a marketer would only need to copy-paste the text of their
+email and they will automatically know if the email will be considered **spam**.
+
+Process & Limitations
+========================================================
+In order to determine whether an email is **spam** or not, I used the **kernlab spam**
+dataset and created a Random Forest model. 
+```{r, echo=FALSE}
+library(kernlab)
+library(lattice)
+library(ggplot2)
+library(caret)
+library(randomForest)
+library(stringr)
+data(spam, package="kernlab")
+inTrain <- createDataPartition(y=spam$type, p=0.7, list=FALSE)
+training <- spam[inTrain,]
+testing <- spam[-inTrain,]
+        
+nzv <- nearZeroVar(training)
+trainingNZV <- training[,-nzv]
+testingNZV <- testing[,-nzv]
+        
+RFmodFit <- randomForest(type ~. , data=trainingNZV, na.action = na.omit)
+RFpred <- predict(RFmodFit, testingNZV, type = "class")
+RFCM <- confusionMatrix(RFpred, testing$type)
+```
+The model yields a **`r round(RFCM$overall[1]*100)`%** accuracy, so it is not perfect, 
+but it should catch many of the mistakes marketers can make when putting together
+new email campaigns.
+
+Next we will look at some sample output from the tool.
+
+Sample Tool Results
+========================================================
+```{r, echo=FALSE}
+library(gridExtra)
+predict_spam <- function(emailText, model, type) {
+        
+        your_count <- str_count(tolower(emailText), "your")
+        you_count <- str_count(tolower(emailText), "you") - your_count
+        hp_count <- str_count(tolower(emailText), "hp")
+        charRoundbracket_count <- str_count(emailText, "\\(")
+        charExclamation_count <- str_count(emailText, "!")
+        charDollar_count <- str_count(emailText, "\\$")
+                        
+        # Convert String to a vector
+        inputStringAsVector <- unlist(strsplit(emailText, split=" "))
+        # Remove words that don't contain capital letters
+        inputStringAsVector <- inputStringAsVector[grepl("['A-Z]", inputStringAsVector)]
+                        
+        uppercaseSearch <- "A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z"
+        inputStringAsVector <- sapply(inputStringAsVector, function(y) str_count(y, uppercaseSearch))
+                        
+        charAve_count <- 0
+        charLong_count <- 0
+        charTotal_count <- 0
+        if(length(inputStringAsVector) > 0) {
+                charAve_count <- mean(inputStringAsVector) # Average length of word with all capital letters
+                charLong_count <- max(inputStringAsVector, na.rm = TRUE) # Longest word in all capital letters
+                charTotal_count <- sum(inputStringAsVector) # Total number of capital letters
+        }
+        userInputToPredict <- as.data.frame(rbind(c(you_count, your_count, hp_count, charRoundbracket_count,
+                                                    charExclamation_count, charDollar_count, charAve_count,
+                                                    charLong_count, charTotal_count)))
+        names(userInputToPredict) <- head(names(trainingNZV), -1)
+        test_set_predictions <- predict(RFmodFit, userInputToPredict, type = "class")
+        if(as.numeric(unlist(test_set_predictions)) == 2) {
+                df <- as.data.frame(rbind(c(emailText, type, "spam")))
+        } else {
+                df <- as.data.frame(rbind(c(emailText, type, "ham")))
+        }
+        names(df) <- c("Message", "Message Type", "Prediction")
+        df
+}
+prediction_results <- predict_spam(
+        "WE HAVE A CRUISE WAITING FOR YOU!!! You need to \n call us now  if you want to take advantage of this great offer \n we have for you. YOU CAN SAVE A LOT OF $$$$$ IF YOU CALL \n NOW. ", RFmodFit, "spam")
+prediction_results <- rbind(prediction_results, predict_spam(
+        "Dear customer, we have not heard from you recently and we \n miss you. Please call us back so we can talk about your \n current needs.", RFmodFit, "ham"))
+prediction_results <- rbind(prediction_results, predict_spam("Do you want to win a new iPad? \n CALL US NOW FOR A ONCE IN A LIFETIME OPPORTUNITY \n We can help you and your family with all your needs. CALL US \n NOW BEFORE THIS OPPORTUNITY PASSES BY YOU!!! ", RFmodFit, "spam"))
+prediction_results <- rbind(prediction_results, predict_spam(
+        "Hello Mr. Customer, We wanted to inform you about \n our new products and services that could help you. \n Please read through this email and feel free to contact our \n sales associates if you have any questions or comments.", RFmodFit, "ham"))
+prediction_results <- rbind(prediction_results, predict_spam(
+        "DO YOU WANT TO EARN MORE MONEY$$$$$ You can earn \n over $10,000 a day from working from home!!!! WHAT ARE \n YOU WAITING FOR? CALL US NOW!", RFmodFit, "spam"))
+
+grid.table(prediction_results, core.just = "left",
+     h.even.alpha = 0,
+     gpar.coretext=gpar(fontsize=8), 
+     gpar.coltext=gpar(fontsize=9, fontface='bold'), 
+     show.rownames = F,
+     gpar.rowtext = gpar(col="black", cex=0.7,
+                            equal.width = TRUE,
+                            show.vlines = TRUE, 
+                            show.hlines = TRUE,
+                            separator="blue") )
+
+```
+
+About the Model
+========================================================
+<small>
+In order to generate our model, we separated our dataset into train (70% of the data) and test (30% of the data). We then built the model around the training data.
+
+Next, we found which outcomes had Near Zero Variance and removed them from the model (this reduced the number of outcomes from 57 to 9). Finally we built a Random Forest model that yields the following confusion matrix:
+```{r, echo=FALSE}
+RFCM
+```
+</small>
